@@ -755,7 +755,7 @@ function update(dt) {
     p.dead -= dt;
     if (p.dead <= 0) {
       if (G.lives <= 0) { gameOver(); return; }
-      p.x = W / 2; p.y = H - 70; p.inv = 2.5;
+      p.x = W / 2; p.y = H - 70; p.inv = 2.5; p.dead = 0;
     }
   } else {
     let mx = 0, my = 0;

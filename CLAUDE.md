@@ -36,3 +36,4 @@ bestimmten Spiels: eigene Sprites, Gegner, Gelände, Musik; keine Namen bekannte
   Schnickschnack. Umgesetzt: Straßen 3 Kacheln breit (2 Spuren, Mittelstreifen, Randlinien), fast gerade (Drift 3 %),
   breite Querstraßen (Küste alle 48 Reihen, Wald 44 mit breiten Brücken, Industrie 26), ruhigere flächige Texturen,
   kaum Büsche, lockerer Wald mit großen Kronen, weniger Industrie-Deko, eine Brandungslinie.
+- Bug: Heli ab dem 2. Leben unsichtbar (und unverwundbar, sammelte keine Extras): Respawn-Timer endete bei -0,0x statt 0, Prüfungen nutzen !p.dead. Fix: p.dead = 0 beim Wiedereinstieg; Regressionstest (Treffer → Respawn → sichtbar/treffbar) per Playwright.
