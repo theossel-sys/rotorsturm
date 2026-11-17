@@ -15,6 +15,7 @@ function resize() {
   cv.style.width = Math.floor(W * SCALE) + 'px';
   cv.style.height = Math.floor(H * SCALE) + 'px';
   ctx.imageSmoothingEnabled = false;
+  try { if (G && G.p) { G.p.x = clamp(G.p.x, 8, W - 8); G.p.y = clamp(G.p.y, 14, H - 12); } } catch (e) { /* beim ersten Aufruf gibt es noch kein Spiel */ }
 }
 addEventListener('resize', resize);
 resize();
@@ -236,6 +237,236 @@ const ZR = 290;                         // Reihen je Zone
 const THEMES = ['KUESTE', 'WALD', 'INDUSTRIE', 'FLUGFELD'];
 let rows = [], rowVar = [], gen = null;
 
+// ---------------------------------------------------------------- Gelände-Renderer
+// Die Kachel-Daten (rows) bleiben die Spiellogik; gezeichnet wird eine zusammenhängende Landschaft in Blöcken zu
+// 32 Reihen: Texturen statt Pixelrauschen, weiche Küsten und Flüsse, durchgehende Straßen, Baumkronen, Dächer mit Schatten.
+const CH = 32;
+const meta = [];                        // je Reihe: Küste, Fluss, Straße ... (für weiche Linien)
+const chunks = new Map();
+function hsh(a, b) { let h = (a * 374761393 + b * 668265263) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+const rgb = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+function noiseTex(cols, cell, sd) {
+  const N = 64, c = document.createElement('canvas'); c.width = c.height = N;
+  const x = c.getContext('2d'), img = x.createImageData(N, N), L = N / cell;
+  const cs = cols.map(rgb);
+  const g = (gx, gy) => hsh(((gx % L) + L) % L + sd * 101, ((gy % L) + L) % L + sd * 7);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const fx = i / cell, fy = j / cell, x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
+    const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+    const v = (g(x0, y0) * (1 - sx) + g(x0 + 1, y0) * sx) * (1 - sy) + (g(x0, y0 + 1) * (1 - sx) + g(x0 + 1, y0 + 1) * sx) * sy;
+    const t = clamp(v * 0.75 + hsh(i + sd * 31, j + sd * 17) * 0.25, 0, 0.999) * (cs.length - 1);
+    const k = Math.floor(t), f = t - k, a = cs[k], b = cs[k + 1], o = (j * N + i) * 4;
+    img.data[o] = a[0] + (b[0] - a[0]) * f; img.data[o + 1] = a[1] + (b[1] - a[1]) * f; img.data[o + 2] = a[2] + (b[2] - a[2]) * f; img.data[o + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  return c;
+}
+const TEX = {
+  grass: noiseTex(['#3f7430', '#4e8a3a', '#5c9a44', '#6aa64e'], 8, 1),
+  meadow: noiseTex(['#5f9a40', '#73ad4c', '#86bb58'], 8, 9),
+  forest: noiseTex(['#1f461d', '#28561f', '#326528'], 8, 2),
+  dirt: noiseTex(['#8d6c45', '#a3805a', '#b8966c', '#c4a47a'], 8, 3),
+  sand: noiseTex(['#cdb57c', '#dcc78f', '#e9d8a6'], 8, 4),
+  concrete: noiseTex(['#76766f', '#85857e', '#93938c', '#a0a099'], 16, 5),
+  deep: noiseTex(['#173f6e', '#1d4c82', '#245a94'], 16, 6),
+  shallow: noiseTex(['#2b6aa6', '#3a80bc', '#4b93cc'], 16, 7),
+  asphalt: noiseTex(['#4a4a48', '#545452', '#5e5e5b'], 8, 8),
+  field: noiseTex(['#8a9636', '#9aa641', '#a8b24b'], 8, 10),
+};
+const BASE = ['grass', 'forest', 'concrete', 'dirt'];
+const metaAt = r => meta[r] || meta[Math.max(0, Math.min(meta.length - 1, r))] || {};
+function smooth(key, r, rad) {
+  let s = 0, n = 0;
+  for (let i = -rad; i <= rad; i++) { const m = meta[r + i]; if (m && m[key] !== undefined && m[key] >= 0) { s += m[key]; n++; } }
+  return n ? s / n : -1;
+}
+// Pfad durch Punkte (weich)
+function curve(x, pts) {
+  x.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length - 1; i++) x.quadraticCurveTo(pts[i][0], pts[i][1], (pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2);
+  const l = pts[pts.length - 1]; x.lineTo(l[0], l[1]);
+}
+function renderChunk(k) {
+  const c = document.createElement('canvas'); c.width = W; c.height = CH * 8;
+  const x = c.getContext('2d');
+  const P = n => x.createPattern(TEX[n], 'repeat');
+  const rA = k * CH, rB = rA + CH - 1;
+  const yTop = r => (rB - r) * 8;       // Oberkante der Reihe im Block
+  const yMid = r => (rB - r) * 8 + 4;
+  const thOf = r => Math.floor(r / ZR) % 4;
+  const tile = (r, col) => (rows[r] ? rows[r][col] : -1);
+  // 1) Grundfläche je Zone
+  for (let r = rA; r <= rB; r++) { x.fillStyle = P(BASE[thOf(r)]); x.fillRect(0, yTop(r), W, 8); }
+  // 2) Flecken (weich, als überlappende Kreise)
+  const blob = (n, rad) => (r, col) => { x.fillStyle = P(n); x.beginPath(); x.arc(col * 8 + 4, yMid(r), rad, 0, Math.PI * 2); x.fill(); };
+  for (let r = rA - 1; r <= rB + 1; r++) for (let col = 0; col < COLS; col++) {
+    const t = tile(r, col), th = thOf(r);
+    if (t === T.GRASS && th !== 0) blob('meadow', 7)(r, col);
+    else if (t === T.GRASS && hsh(r, col) < 0.08) blob('meadow', 6)(r, col);
+    else if (t === T.SAND && th === 3) blob('sand', 7)(r, col);
+    else if (t === T.ROCK) blob('sand', 6)(r, col);
+  }
+  // Felder: Streifen
+  for (let r = rA; r <= rB; r++) for (let col = 0; col < COLS; col++) if (tile(r, col) === T.FIELD) {
+    x.fillStyle = P('field'); x.fillRect(col * 8 - 1, yTop(r) - 1, 10, 10);
+    x.fillStyle = 'rgba(70,80,20,.35)'; for (let yy = 0; yy < 8; yy += 3) x.fillRect(col * 8 - 1, yTop(r) + yy, 10, 1);
+  }
+  // 3) Küste (Zone Küste): flaches und tiefes Wasser, Strand, Brandung
+  const seg = (pred, fn) => { let cur = []; for (let r = rB + 2; r >= rA - 2; r--) { if (pred(r)) cur.push(r); else if (cur.length) { fn(cur); cur = []; } } if (cur.length) fn(cur); };
+  seg(r => metaAt(r).coast >= 0 && meta[r], rs => {
+    const pts = rs.map(r => [smooth('coast', r, 4) * 8, yMid(r)]);
+    const ya = yMid(rs[0]) - 6, yb = yMid(rs[rs.length - 1]) + 6;
+    pts.unshift([pts[0][0], ya]); pts.push([pts[pts.length - 1][0], yb]);
+    x.save(); x.lineJoin = 'round'; x.lineCap = 'round';
+    x.strokeStyle = P('sand'); x.lineWidth = 16; x.beginPath(); curve(x, pts.map(p => [p[0] + 3, p[1]])); x.stroke();
+    x.fillStyle = P('shallow'); x.beginPath(); curve(x, pts); x.lineTo(-20, yb); x.lineTo(-20, ya); x.closePath(); x.fill();
+    x.fillStyle = P('deep'); x.beginPath(); curve(x, pts.map(p => [p[0] - 22, p[1]])); x.lineTo(-20, yb); x.lineTo(-20, ya); x.closePath(); x.fill();
+    x.strokeStyle = 'rgba(255,255,255,.55)'; x.lineWidth = 1.5; x.beginPath(); curve(x, pts.map(p => [p[0] - 1, p[1]])); x.stroke();
+    x.strokeStyle = 'rgba(255,255,255,.22)'; x.lineWidth = 1; x.setLineDash([5, 7]); x.beginPath(); curve(x, pts.map(p => [p[0] - 6, p[1]])); x.stroke();
+    x.restore();
+  });
+  // 4) Fluss (Zone Wald): Ufer, Wasser, Glanz
+  seg(r => metaAt(r).river >= 0 && meta[r], rs => {
+    const mid = rs.map(r => { const w = smooth('rw', r, 3); return [(smooth('river', r, 3) + w / 2) * 8, yMid(r), w * 4]; });
+    mid.unshift([mid[0][0], mid[0][1] - 6, mid[0][2]]); mid.push([mid[mid.length - 1][0], mid[mid.length - 1][1] + 6, mid[mid.length - 1][2]]);
+    const L = mid.map(p => [p[0] - p[2], p[1]]), R = mid.map(p => [p[0] + p[2], p[1]]);
+    x.save(); x.lineJoin = 'round';
+    x.strokeStyle = P('dirt'); x.lineWidth = 6; x.beginPath(); curve(x, L); x.stroke(); x.beginPath(); curve(x, R); x.stroke();
+    x.fillStyle = P('shallow'); x.beginPath(); curve(x, L); R.slice().reverse().forEach(p => x.lineTo(p[0], p[1])); x.closePath(); x.fill();
+    x.strokeStyle = 'rgba(255,255,255,.25)'; x.lineWidth = 1; x.beginPath(); curve(x, mid.map(p => [p[0] - p[2] * 0.4, p[1]])); x.stroke();
+    x.restore();
+  });
+  // 5) Straßen: durchgehend, mit Rand und Mittelstreifen
+  const road = pts => {
+    x.save(); x.lineJoin = 'round'; x.lineCap = 'butt';
+    x.strokeStyle = '#2f2f2d'; x.lineWidth = 10; x.beginPath(); curve(x, pts); x.stroke();
+    x.strokeStyle = P('asphalt'); x.lineWidth = 8; x.beginPath(); curve(x, pts); x.stroke();
+    x.strokeStyle = 'rgba(232,224,190,.85)'; x.lineWidth = 1; x.setLineDash([4, 5]); x.beginPath(); curve(x, pts); x.stroke();
+    x.restore();
+  };
+  seg(r => metaAt(r).road >= 0 && meta[r], rs => {
+    const pts = rs.map(r => [smooth('road', r, 3) * 8 + 4, yMid(r)]);
+    pts.unshift([pts[0][0], pts[0][1] - 6]); pts.push([pts[pts.length - 1][0], pts[pts.length - 1][1] + 6]);
+    road(pts);
+    // Brücken, wo die Straße den Fluss kreuzt
+    rs.forEach(r => {
+      const m = meta[r]; if (!(m.river >= 0)) return;
+      const rx = smooth('road', r, 3) * 8 + 4, a = (smooth('river', r, 3)) * 8 - 2, b = a + smooth('rw', r, 3) * 8 + 4;
+      if (rx > a && rx < b) { x.fillStyle = '#7d6a4f'; x.fillRect(rx - 6, yTop(r), 12, 8); x.fillStyle = '#4a3d2c'; x.fillRect(rx - 7, yTop(r), 1, 8); x.fillRect(rx + 6, yTop(r), 1, 8); }
+    });
+  });
+  for (let r = rA; r <= rB; r++) {
+    const th = thOf(r);
+    if (th === 2) [52, 180].forEach(cx => road([[cx, yTop(r) - 1], [cx, yTop(r) + 9]]));
+  }
+  for (let r = rA; r <= rB; r++) if (metaAt(r).hroad && meta[r]) {
+    const y = yTop(r);
+    x.fillStyle = '#2f2f2d'; x.fillRect(0, y - 1, W, 10); x.fillStyle = P('asphalt'); x.fillRect(0, y, W, 8);
+    x.fillStyle = 'rgba(232,224,190,.85)'; for (let xx = 2; xx < W; xx += 9) x.fillRect(xx, y + 4, 4, 1);
+    for (let col = 0; col < COLS; col++) if (tile(r, col) === T.BRIDGE) { x.fillStyle = '#7d6a4f'; x.fillRect(col * 8, y - 1, 8, 10); x.fillStyle = '#4a3d2c'; x.fillRect(col * 8, y - 2, 8, 1); x.fillRect(col * 8, y + 9, 8, 1); }
+  }
+  // Flugfeld: Piste mit Markierungen
+  for (let r = rA; r <= rB; r++) if (thOf(r) === 3 && meta[r]) {
+    const y = yTop(r);
+    x.fillStyle = '#8a8a82'; x.fillRect(80, y, 80, 8); x.fillStyle = P('asphalt'); x.fillRect(84, y, 72, 8);
+    x.fillStyle = 'rgba(240,236,220,.9)'; if (r % 6 < 3) x.fillRect(119, y, 2, 8); x.fillRect(88, y, 1, 8); x.fillRect(151, y, 1, 8);
+  }
+  // 6) Gebäude: Satteldächer mit Schatten
+  for (let r = rA - 1; r <= rB + 1; r++) {
+    for (let col = 0; col < COLS;) {
+      const t = tile(r, col);
+      if (t !== T.ROOF && t !== T.ROOF2) { col++; continue; }
+      let e = col; while (e + 1 < COLS && tile(r, e + 1) === t) e++;
+      const x0 = col * 8, w = (e - col + 1) * 8, y = yTop(r);
+      x.fillStyle = 'rgba(0,0,0,.3)'; x.fillRect(x0 + 3, y + 3, w, 8);
+      col = e + 1;
+    }
+  }
+  for (let r = rA - 1; r <= rB + 1; r++) {
+    for (let col = 0; col < COLS;) {
+      const t = tile(r, col);
+      if (t !== T.ROOF && t !== T.ROOF2) { col++; continue; }
+      let e = col; while (e + 1 < COLS && tile(r, e + 1) === t) e++;
+      const x0 = col * 8, w = (e - col + 1) * 8, y = yTop(r), half = Math.floor(w / 2);
+      if (t === T.ROOF) {
+        x.fillStyle = '#b5553f'; x.fillRect(x0, y, half, 8); x.fillStyle = '#86392a'; x.fillRect(x0 + half, y, w - half, 8);
+        x.fillStyle = 'rgba(0,0,0,.18)'; for (let yy = 1; yy < 8; yy += 3) x.fillRect(x0, y + yy, w, 1);
+        x.fillStyle = '#5e2519'; x.fillRect(x0 + half - 1, y, 2, 8);
+        if (tile(r + 1, col) !== t) { x.fillStyle = '#5e2519'; x.fillRect(x0, y, w, 1); }
+        if (tile(r - 1, col) !== t) { x.fillStyle = '#4a1d14'; x.fillRect(x0, y + 7, w, 1); }
+        if (hsh(r, col) < 0.25 && w > 10) { x.fillStyle = '#3a3a3a'; x.fillRect(x0 + 3, y + 2, 2, 3); }
+      } else {
+        x.fillStyle = '#7c8794'; x.fillRect(x0, y, w, 8); x.fillStyle = '#5f6975'; for (let xx = x0 + 2; xx < x0 + w; xx += 4) x.fillRect(xx, y, 1, 8);
+        if (tile(r + 1, col) !== t) { x.fillStyle = '#9aa6b3'; x.fillRect(x0, y, w, 1); }
+        if (tile(r - 1, col) !== t) { x.fillStyle = '#3e4650'; x.fillRect(x0, y + 7, w, 1); }
+      }
+      col = e + 1;
+    }
+  }
+  // Industrie: Öltanks, Container, Flecken
+  for (let r = rA; r <= rB; r++) for (let col = 1; col < COLS - 1; col++) {
+    if (thOf(r) !== 2 || tile(r, col) !== T.CONCRETE) continue;
+    const h = hsh(r * 13, col * 7), cx = col * 8 + 4, cy = yMid(r);
+    if (h < 0.006 && tile(r, col + 1) === T.CONCRETE && tile(r, col - 1) === T.CONCRETE) {
+      x.fillStyle = 'rgba(0,0,0,.3)'; x.beginPath(); x.arc(cx + 3, cy + 3, 9, 0, 7); x.fill();
+      x.fillStyle = '#c9c6bc'; x.beginPath(); x.arc(cx, cy, 9, 0, 7); x.fill();
+      x.fillStyle = '#e2dfd5'; x.beginPath(); x.arc(cx - 2, cy - 2, 6, 0, 7); x.fill();
+      x.strokeStyle = '#8e8b82'; x.lineWidth = 1; x.beginPath(); x.arc(cx, cy, 4, 0, 7); x.stroke();
+    } else if (h < 0.022) {
+      const cc = ['#a3402e', '#2f6a9a', '#3f7a3a', '#c48a2a'][Math.floor(hsh(col, r) * 4)];
+      x.fillStyle = 'rgba(0,0,0,.3)'; x.fillRect(cx - 3, cy - 1, 9, 5);
+      x.fillStyle = cc; x.fillRect(cx - 5, cy - 3, 9, 5); x.fillStyle = 'rgba(0,0,0,.25)'; for (let k = 0; k < 9; k += 2) x.fillRect(cx - 5 + k, cy - 3, 1, 5);
+    } else if (h < 0.05) {
+      x.fillStyle = 'rgba(30,30,28,.25)'; x.beginPath(); x.ellipse(cx, cy, 5, 3, h * 20, 0, 7); x.fill();
+    } else if (h < 0.08) {
+      x.fillStyle = 'rgba(240,236,220,.5)'; x.fillRect(col * 8, yTop(r) + 1, 1, 6);
+    }
+  }
+  // 7) Felsen
+  for (let r = rA; r <= rB; r++) for (let col = 0; col < COLS; col++) if (tile(r, col) === T.ROCK && hsh(r, col) < 0.55) {
+    const cx = col * 8 + 4 + (hsh(col, r) - 0.5) * 4, cy = yMid(r), s = 2.5 + hsh(r + 3, col) * 2.5;
+    x.fillStyle = 'rgba(0,0,0,.3)'; x.beginPath(); x.ellipse(cx + 2, cy + 2, s + 1, s * 0.8, 0, 0, 7); x.fill();
+    x.fillStyle = '#6e6458'; x.beginPath(); x.ellipse(cx, cy, s + 1, s * 0.85, 0, 0, 7); x.fill();
+    x.fillStyle = '#9a8f80'; x.beginPath(); x.ellipse(cx - 1, cy - 1, s * 0.6, s * 0.45, 0, 0, 7); x.fill();
+  }
+  // 8) Bäume: Kronen mit Schatten (Wald) und einzelne Büsche auf Wiesen
+  const trees = [];
+  for (let r = rA - 1; r <= rB + 1; r++) for (let col = 0; col < COLS; col++) {
+    const t = tile(r, col);
+    if (t === T.FOREST) for (let k2 = 0; k2 < 2; k2++) trees.push([col * 8 + 1 + hsh(r * 3 + k2, col) * 6, yMid(r) + (hsh(col * 5 + k2, r) - 0.5) * 6, 3.6 + hsh(r + k2, col * 7) * 2.2, hsh(col, r + k2)]);
+    else if (t === T.GRASS && hsh(r * 7, col * 3) < 0.07) trees.push([col * 8 + 4, yMid(r), 2.4, hsh(col, r)]);
+  }
+  trees.forEach(([tx, ty, s]) => { x.fillStyle = 'rgba(8,24,6,.45)'; x.beginPath(); x.arc(tx + 2, ty + 2, s, 0, 7); x.fill(); });
+  trees.forEach(([tx, ty, s, v]) => {
+    x.fillStyle = v < 0.5 ? '#2e6a28' : '#357530'; x.beginPath(); x.arc(tx, ty, s, 0, 7); x.fill();
+    x.fillStyle = v < 0.5 ? '#48913a' : '#56a043'; x.beginPath(); x.arc(tx - s * 0.3, ty - s * 0.3, s * 0.55, 0, 7); x.fill();
+  });
+  return c;
+}
+function chunkCanvas(k) {
+  let c = chunks.get(k);
+  if (!c) { c = renderChunk(k); chunks.set(k, c); }
+  return c;
+}
+function drawTerrain() {
+  const kA = Math.floor(Math.floor(G.cam / 8) / CH), kB = Math.floor(Math.ceil((G.cam + H) / 8) / CH);
+  for (let k = kA; k <= kB; k++) {
+    const y = Math.round(H - ((k + 1) * CH * 8 - G.cam));
+    ctx.drawImage(chunkCanvas(k), 0, y);
+  }
+  for (const k of chunks.keys()) if (k < kA - 1) chunks.delete(k);
+  // Wasser glitzert (bewegt)
+  const r0 = Math.floor(G.cam / 8), r1 = Math.ceil((G.cam + H) / 8);
+  const tt = Math.floor(G.t * 3);
+  ctx.fillStyle = 'rgba(255,255,255,.4)';
+  for (let r = r0; r <= r1; r++) {
+    const m = meta[r]; if (!m) continue;
+    const y = Math.round(H - (r * 8 + 4 - G.cam));
+    if (m.coast >= 0 && hsh(r, tt) < 0.35) ctx.fillRect(Math.floor(hsh(tt, r) * Math.max(0, m.coast * 8 - 10)), y, 3, 1);
+    if (m.river >= 0 && hsh(r, tt + 9) < 0.2) ctx.fillRect(Math.floor(m.river * 8 + hsh(tt, r + 3) * m.rw * 8), y, 2, 1);
+  }
+}
+
 function newGen() {
   return { coast: 9, river: 15, riverW: 3, road: 20, blocks: [], blobs: [] };
 }
@@ -259,7 +490,8 @@ function genRow(r) {
       else { const b = inBlob(i); row[i] = b ? (b.k < 0.6 ? T.FOREST : T.FIELD) : T.GRASS; }
     }
     if (rnd() < 0.15) g.road = clamp(g.road + ri(-1, 1), coast + 3, COLS - 3);
-    if (coast < COLS - 2) { const rc = clamp(g.road, coast + 2, COLS - 1); row[rc] = T.ROAD; if (g.prev !== undefined && g.prev !== rc && g.prev > coast) row[g.prev] = T.ROAD; g.prev = rc; } else g.prev = undefined;
+    g.m = { coast, road: -1 };
+    if (coast < COLS - 2) { const rc = clamp(g.road, coast + 2, COLS - 1); row[rc] = T.ROAD; g.m.road = rc; if (g.prev !== undefined && g.prev !== rc && g.prev > coast) row[g.prev] = T.ROAD; g.prev = rc; } else g.prev = undefined;
     village(r, row, coast + 2, COLS);
   } else if (th === 1) {                // Wald mit Fluss und Brücken
     if (rnd() < 0.3) g.river = clamp(g.river + ri(-1, 1), 4, COLS - 6);
@@ -272,6 +504,7 @@ function genRow(r) {
       if (i >= g.river && i < g.river + g.riverW) row[i] = T.WATER;
       else if (i === g.river - 1 || i === g.river + g.riverW) row[i] = row[i] === T.FOREST ? T.GRASS : row[i];
     }
+    g.m = { river: g.river, rw: g.riverW, road: bridge ? -1 : g.road, hroad: bridge };
     if (bridge) for (let i = 0; i < COLS; i++) row[i] = row[i] === T.WATER ? T.BRIDGE : T.HROAD;
     else {
       const put = c => { row[c] = row[c] === T.WATER ? T.BRIDGE : T.ROAD; };
@@ -280,6 +513,7 @@ function genRow(r) {
     g.prev = g.road;
   } else if (th === 2) {                // Industrie: Straßenraster, Hallen
     const hroad = zr % 22 === 0;
+    g.m = { hroad };
     for (let i = 0; i < COLS; i++) {
       const b = inBlob(i);
       row[i] = b && b.k < 0.25 ? T.GRASS : T.CONCRETE;
@@ -295,9 +529,10 @@ function genRow(r) {
       if (i === 10 || i === 19) row[i] = T.CONCRETE;
     }
     if (zr % 6 === 0) vr.fill(0, 11, 19); else vr.fill(1, 11, 19);
+    g.m = { runway: true };
     village(r, row, 0, 9, true); village(r, row, 21, COLS, true);
   }
-  rows[r] = row; rowVar[r] = vr;
+  rows[r] = row; rowVar[r] = vr; meta[r] = g.m || {}; g.m = null;
   spawnGround(r, row, z, th);
 }
 // Häuser / Hallen als Blöcke über mehrere Reihen
@@ -317,7 +552,7 @@ let G = null;
 const SPEED = 30;                       // Scrollgeschwindigkeit px/s
 function newGame() {
   seed = (Math.random() * 2 ** 32) >>> 0;
-  rows = []; rowVar = []; gen = newGen();
+  rows = []; rowVar = []; gen = newGen(); meta.length = 0; chunks.clear();
   G = {
     t: 0, cam: 0, genTo: -1, zone: 0, loop: 0, bossOn: null, bossDone: -1, banner: null,
     score: 0, lives: 3, bombs: 3, nextLife: 50000,
@@ -329,7 +564,7 @@ function newGame() {
 }
 function banner(t) { G.banner = { t, life: 2.6 }; }
 function ensureRows() {
-  const need = Math.ceil((G.cam + H) / 8) + 6;
+  const need = Math.max(Math.ceil((G.cam + H) / 8) + 6, (Math.floor(Math.ceil((G.cam + H) / 8) / CH) + 1) * CH + 6);
   while (G.genTo < need) genRow(++G.genTo);
 }
 // Bildschirm-y eines Bodenpunkts (Welt-Abstand d vom Start)
@@ -650,16 +885,7 @@ function draw(noHud) {
   ctx.save();
   if (G.shake > 0) ctx.translate(Math.round(rr(-3, 3) * G.shake * 2), Math.round(rr(-3, 3) * G.shake * 2));
   // Gelände
-  const r0 = Math.floor(G.cam / 8), r1 = Math.ceil((G.cam + H) / 8) + 1;
-  const wv = Math.floor(G.t * 2) % 3;
-  for (let r = r0; r <= r1; r++) {
-    const row = rows[r]; if (!row) continue;
-    const y = Math.round(H - (r * 8 + 8 - G.cam));
-    for (let c = 0; c < COLS; c++) {
-      const t = row[c], v = (t === T.WATER || t === T.DEEP) ? (rowVar[r][c] + wv) % 3 : rowVar[r][c];
-      ctx.drawImage(TILE[t][v], c * 8, y);
-    }
-  }
+  drawTerrain();
   // Brandflecken
   G.decals.forEach(dc => { const y = gy(dc.d); ctx.fillStyle = 'rgba(25,20,15,.55)'; ctx.beginPath(); ctx.ellipse(Math.round(dc.x), Math.round(y), dc.r, dc.r * 0.8, 0, 0, Math.PI * 2); ctx.fill(); });
   // Bodengegner
@@ -716,10 +942,12 @@ function draw(noHud) {
   });
   // Spieler
   const p = G.p;
-  if (!p.dead && !(p.inv > 0 && Math.floor(G.t * 16) % 2 === 0)) {
+  if (!p.dead) {
     shadow(p.x, p.y, 12, 8);
+    if (p.inv > 0) ctx.globalAlpha = Math.floor(G.t * 14) % 2 ? 1 : 0.45;
     blit(SPR.player, p.x, p.y);
     rotor(p.x, p.y - 3, 11, G.t);
+    ctx.globalAlpha = 1;
     if (p.shield) { ctx.strokeStyle = `rgba(79,195,255,${0.5 + Math.sin(G.t * 10) * 0.3})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(Math.round(p.x), Math.round(p.y), 13, 0, Math.PI * 2); ctx.stroke(); }
   }
   // Schüsse

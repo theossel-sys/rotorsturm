@@ -27,3 +27,8 @@ bestimmten Spiels: eigene Sprites, Gegner, Gelände, Musik; keine Namen bekannte
 
 ## Verlauf
 - 2026-11-17: entstanden im Repo Dragon-Trader (Branch), mit Draw-Things-Grafiken, dann hierher umgezogen.
+- Feedback „Heli verschwindet manchmal, Hintergrund nicht schön“: Unverwundbarkeit blinkt jetzt halbtransparent statt
+  unsichtbar; bei Größenänderung (Safari-Leiste) wird der Heli ins Bild geklemmt. Neuer Gelände-Renderer
+  (renderChunk/drawTerrain, Blöcke à 32 Reihen, Cache): Rauschtexturen, weiche Küste mit Strand/Brandung/Tiefwasser,
+  Flüsse mit Ufern, durchgehende Straßen + Brücken, Baumkronen mit Schatten, Satteldächer, Felsen, Industrie-Deko,
+  Wasser-Glitzern. Kacheldaten (rows) + meta[] je Reihe bleiben die Spiellogik.
