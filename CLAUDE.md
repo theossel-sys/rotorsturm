@@ -32,3 +32,7 @@ bestimmten Spiels: eigene Sprites, Gegner, Gelände, Musik; keine Namen bekannte
   (renderChunk/drawTerrain, Blöcke à 32 Reihen, Cache): Rauschtexturen, weiche Küste mit Strand/Brandung/Tiefwasser,
   Flüsse mit Ufern, durchgehende Straßen + Brücken, Baumkronen mit Schatten, Satteldächer, Felsen, Industrie-Deko,
   Wasser-Glitzern. Kacheldaten (rows) + meta[] je Reihe bleiben die Spiellogik.
+- Stil-Wunsch (Referenzbild eines Arcade-Klassikers, nur als Richtung – nicht nachbauen): breite Straßen, weniger
+  Schnickschnack. Umgesetzt: Straßen 3 Kacheln breit (2 Spuren, Mittelstreifen, Randlinien), fast gerade (Drift 3 %),
+  breite Querstraßen (Küste alle 48 Reihen, Wald 44 mit breiten Brücken, Industrie 26), ruhigere flächige Texturen,
+  kaum Büsche, lockerer Wald mit großen Kronen, weniger Industrie-Deko, eine Brandungslinie.

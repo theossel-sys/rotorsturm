@@ -262,15 +262,15 @@ function noiseTex(cols, cell, sd) {
   return c;
 }
 const TEX = {
-  grass: noiseTex(['#3f7430', '#4e8a3a', '#5c9a44', '#6aa64e'], 8, 1),
+  grass: noiseTex(['#4b8c39', '#4f913c', '#549640'], 16, 1),
   meadow: noiseTex(['#5f9a40', '#73ad4c', '#86bb58'], 8, 9),
-  forest: noiseTex(['#1f461d', '#28561f', '#326528'], 8, 2),
-  dirt: noiseTex(['#8d6c45', '#a3805a', '#b8966c', '#c4a47a'], 8, 3),
+  forest: noiseTex(['#2f6a2a', '#33702d', '#377630'], 16, 2),
+  dirt: noiseTex(['#a8885e', '#ae8e63', '#b49468'], 16, 3),
   sand: noiseTex(['#cdb57c', '#dcc78f', '#e9d8a6'], 8, 4),
-  concrete: noiseTex(['#76766f', '#85857e', '#93938c', '#a0a099'], 16, 5),
+  concrete: noiseTex(['#8e8e88', '#93938d', '#989892'], 16, 5),
   deep: noiseTex(['#173f6e', '#1d4c82', '#245a94'], 16, 6),
   shallow: noiseTex(['#2b6aa6', '#3a80bc', '#4b93cc'], 16, 7),
-  asphalt: noiseTex(['#4a4a48', '#545452', '#5e5e5b'], 8, 8),
+  asphalt: noiseTex(['#76767a', '#7a7a7e', '#7e7e82'], 16, 8),
   field: noiseTex(['#8a9636', '#9aa641', '#a8b24b'], 8, 10),
 };
 const BASE = ['grass', 'forest', 'concrete', 'dirt'];
@@ -302,7 +302,6 @@ function renderChunk(k) {
   for (let r = rA - 1; r <= rB + 1; r++) for (let col = 0; col < COLS; col++) {
     const t = tile(r, col), th = thOf(r);
     if (t === T.GRASS && th !== 0) blob('meadow', 7)(r, col);
-    else if (t === T.GRASS && hsh(r, col) < 0.08) blob('meadow', 6)(r, col);
     else if (t === T.SAND && th === 3) blob('sand', 7)(r, col);
     else if (t === T.ROCK) blob('sand', 6)(r, col);
   }
@@ -322,7 +321,6 @@ function renderChunk(k) {
     x.fillStyle = P('shallow'); x.beginPath(); curve(x, pts); x.lineTo(-20, yb); x.lineTo(-20, ya); x.closePath(); x.fill();
     x.fillStyle = P('deep'); x.beginPath(); curve(x, pts.map(p => [p[0] - 22, p[1]])); x.lineTo(-20, yb); x.lineTo(-20, ya); x.closePath(); x.fill();
     x.strokeStyle = 'rgba(255,255,255,.55)'; x.lineWidth = 1.5; x.beginPath(); curve(x, pts.map(p => [p[0] - 1, p[1]])); x.stroke();
-    x.strokeStyle = 'rgba(255,255,255,.22)'; x.lineWidth = 1; x.setLineDash([5, 7]); x.beginPath(); curve(x, pts.map(p => [p[0] - 6, p[1]])); x.stroke();
     x.restore();
   });
   // 4) Fluss (Zone Wald): Ufer, Wasser, Glanz
@@ -339,9 +337,10 @@ function renderChunk(k) {
   // 5) Straßen: durchgehend, mit Rand und Mittelstreifen
   const road = pts => {
     x.save(); x.lineJoin = 'round'; x.lineCap = 'butt';
-    x.strokeStyle = '#2f2f2d'; x.lineWidth = 10; x.beginPath(); curve(x, pts); x.stroke();
-    x.strokeStyle = P('asphalt'); x.lineWidth = 8; x.beginPath(); curve(x, pts); x.stroke();
-    x.strokeStyle = 'rgba(232,224,190,.85)'; x.lineWidth = 1; x.setLineDash([4, 5]); x.beginPath(); curve(x, pts); x.stroke();
+    x.strokeStyle = '#3a3a3c'; x.lineWidth = 28; x.beginPath(); curve(x, pts); x.stroke();
+    x.strokeStyle = P('asphalt'); x.lineWidth = 26; x.beginPath(); curve(x, pts); x.stroke();
+    x.strokeStyle = 'rgba(245,245,240,.9)'; x.lineWidth = 1; x.beginPath(); curve(x, pts.map(p => [p[0] - 11, p[1]])); x.stroke(); x.beginPath(); curve(x, pts.map(p => [p[0] + 11, p[1]])); x.stroke();
+    x.strokeStyle = '#f5f5f0'; x.lineWidth = 2; x.setLineDash([8, 8]); x.beginPath(); curve(x, pts); x.stroke();
     x.restore();
   };
   seg(r => metaAt(r).road >= 0 && meta[r], rs => {
@@ -352,18 +351,21 @@ function renderChunk(k) {
     rs.forEach(r => {
       const m = meta[r]; if (!(m.river >= 0)) return;
       const rx = smooth('road', r, 3) * 8 + 4, a = (smooth('river', r, 3)) * 8 - 2, b = a + smooth('rw', r, 3) * 8 + 4;
-      if (rx > a && rx < b) { x.fillStyle = '#7d6a4f'; x.fillRect(rx - 6, yTop(r), 12, 8); x.fillStyle = '#4a3d2c'; x.fillRect(rx - 7, yTop(r), 1, 8); x.fillRect(rx + 6, yTop(r), 1, 8); }
+      if (rx + 12 > a && rx - 12 < b) { x.fillStyle = '#5a5a5e'; x.fillRect(rx - 16, yTop(r), 2, 8); x.fillRect(rx + 14, yTop(r), 2, 8); }
     });
   });
   for (let r = rA; r <= rB; r++) {
     const th = thOf(r);
-    if (th === 2) [52, 180].forEach(cx => road([[cx, yTop(r) - 1], [cx, yTop(r) + 9]]));
+    if (th === 2 && meta[r]) [52, 180].forEach(cx => road([[cx, yTop(r) - 1], [cx, yTop(r) + 9]]));
   }
   for (let r = rA; r <= rB; r++) if (metaAt(r).hroad && meta[r]) {
-    const y = yTop(r);
-    x.fillStyle = '#2f2f2d'; x.fillRect(0, y - 1, W, 10); x.fillStyle = P('asphalt'); x.fillRect(0, y, W, 8);
-    x.fillStyle = 'rgba(232,224,190,.85)'; for (let xx = 2; xx < W; xx += 9) x.fillRect(xx, y + 4, 4, 1);
-    for (let col = 0; col < COLS; col++) if (tile(r, col) === T.BRIDGE) { x.fillStyle = '#7d6a4f'; x.fillRect(col * 8, y - 1, 8, 10); x.fillStyle = '#4a3d2c'; x.fillRect(col * 8, y - 2, 8, 1); x.fillRect(col * 8, y + 9, 8, 1); }
+    const m = meta[r], y = yTop(r), x0 = (m.hfrom || 0) * 8;
+    x.fillStyle = P('asphalt'); x.fillRect(x0, y, W - x0, 8);
+    const up = metaAt(r + 1).hroad, dn = metaAt(r - 1).hroad;
+    if (!up) { x.fillStyle = '#3a3a3c'; x.fillRect(x0, y - 1, W - x0, 1); x.fillStyle = 'rgba(245,245,240,.9)'; x.fillRect(x0, y + 2, W - x0, 1); }
+    if (!dn) { x.fillStyle = '#3a3a3c'; x.fillRect(x0, y + 8, W - x0, 1); x.fillStyle = 'rgba(245,245,240,.9)'; x.fillRect(x0, y + 5, W - x0, 1); }
+    if (m.hmid) { x.fillStyle = '#f5f5f0'; for (let xx = x0 + 4; xx < W; xx += 16) x.fillRect(xx, y + 3, 8, 2); }
+    for (let col = 0; col < COLS; col++) if (tile(r, col) === T.BRIDGE) { x.fillStyle = P('asphalt'); x.fillRect(col * 8, y, 8, 8); if (!up) { x.fillStyle = '#5a5a5e'; x.fillRect(col * 8, y - 2, 8, 2); } if (!dn) { x.fillStyle = '#5a5a5e'; x.fillRect(col * 8, y + 8, 8, 2); } }
   }
   // Flugfeld: Piste mit Markierungen
   for (let r = rA; r <= rB; r++) if (thOf(r) === 3 && meta[r]) {
@@ -416,9 +418,9 @@ function renderChunk(k) {
       const cc = ['#a3402e', '#2f6a9a', '#3f7a3a', '#c48a2a'][Math.floor(hsh(col, r) * 4)];
       x.fillStyle = 'rgba(0,0,0,.3)'; x.fillRect(cx - 3, cy - 1, 9, 5);
       x.fillStyle = cc; x.fillRect(cx - 5, cy - 3, 9, 5); x.fillStyle = 'rgba(0,0,0,.25)'; for (let k = 0; k < 9; k += 2) x.fillRect(cx - 5 + k, cy - 3, 1, 5);
-    } else if (h < 0.05) {
+    } else if (h < 0.022) {
       x.fillStyle = 'rgba(30,30,28,.25)'; x.beginPath(); x.ellipse(cx, cy, 5, 3, h * 20, 0, 7); x.fill();
-    } else if (h < 0.08) {
+    } else if (h < 0.022) {
       x.fillStyle = 'rgba(240,236,220,.5)'; x.fillRect(col * 8, yTop(r) + 1, 1, 6);
     }
   }
@@ -433,8 +435,8 @@ function renderChunk(k) {
   const trees = [];
   for (let r = rA - 1; r <= rB + 1; r++) for (let col = 0; col < COLS; col++) {
     const t = tile(r, col);
-    if (t === T.FOREST) for (let k2 = 0; k2 < 2; k2++) trees.push([col * 8 + 1 + hsh(r * 3 + k2, col) * 6, yMid(r) + (hsh(col * 5 + k2, r) - 0.5) * 6, 3.6 + hsh(r + k2, col * 7) * 2.2, hsh(col, r + k2)]);
-    else if (t === T.GRASS && hsh(r * 7, col * 3) < 0.07) trees.push([col * 8 + 4, yMid(r), 2.4, hsh(col, r)]);
+    if (t === T.FOREST && (r + col) % 2 === 0) trees.push([col * 8 + 4 + (hsh(r * 3, col) - 0.5) * 4, yMid(r) + (hsh(col * 5, r) - 0.5) * 4, 6 + hsh(r, col * 7) * 2, hsh(col, r)]);
+    else if (t === T.GRASS && hsh(r * 7, col * 3) < 0.015) trees.push([col * 8 + 4, yMid(r), 4.5, hsh(col, r)]);
   }
   trees.forEach(([tx, ty, s]) => { x.fillStyle = 'rgba(8,24,6,.45)'; x.beginPath(); x.arc(tx + 2, ty + 2, s, 0, 7); x.fill(); });
   trees.forEach(([tx, ty, s, v]) => {
@@ -489,35 +491,38 @@ function genRow(r) {
       else if (i === coast) row[i] = T.SAND;
       else { const b = inBlob(i); row[i] = b ? (b.k < 0.6 ? T.FOREST : T.FIELD) : T.GRASS; }
     }
-    if (rnd() < 0.15) g.road = clamp(g.road + ri(-1, 1), coast + 3, COLS - 3);
+    if (rnd() < 0.03) g.road = clamp(g.road + ri(-1, 1), coast + 4, COLS - 4);
     g.m = { coast, road: -1 };
-    if (coast < COLS - 2) { const rc = clamp(g.road, coast + 2, COLS - 1); row[rc] = T.ROAD; g.m.road = rc; if (g.prev !== undefined && g.prev !== rc && g.prev > coast) row[g.prev] = T.ROAD; g.prev = rc; } else g.prev = undefined;
+    const cross = zr % 48 < 3 && zr < ZR - 90;
+    if (coast < COLS - 5) {
+      const rc = clamp(g.road, coast + 3, COLS - 3);
+      for (let i = rc - 1; i <= rc + 1; i++) row[i] = T.ROAD;
+      g.m.road = rc;
+      if (cross) { for (let i = coast + 2; i < COLS; i++) row[i] = T.HROAD; g.m.hroad = true; g.m.hmid = zr % 48 === 1; g.m.hfrom = coast + 2; }
+    }
     village(r, row, coast + 2, COLS);
   } else if (th === 1) {                // Wald mit Fluss und Brücken
     if (rnd() < 0.3) g.river = clamp(g.river + ri(-1, 1), 4, COLS - 6);
     if (rnd() < 0.1) g.riverW = clamp(g.riverW + ri(-1, 1), 2, 4);
-    if (rnd() < 0.12) g.road = clamp(g.road + ri(-1, 1), 2, COLS - 3);
-    const bridge = zr % 40 === 20;
+    if (rnd() < 0.03) g.road = clamp(g.road + ri(-1, 1), 3, COLS - 4);
+    const bridge = zr % 44 >= 20 && zr % 44 <= 22;
     for (let i = 0; i < COLS; i++) {
       const b = inBlob(i);
       row[i] = b ? (b.k < 0.5 ? T.GRASS : T.FIELD) : T.FOREST;
       if (i >= g.river && i < g.river + g.riverW) row[i] = T.WATER;
       else if (i === g.river - 1 || i === g.river + g.riverW) row[i] = row[i] === T.FOREST ? T.GRASS : row[i];
     }
-    g.m = { river: g.river, rw: g.riverW, road: bridge ? -1 : g.road, hroad: bridge };
-    if (bridge) for (let i = 0; i < COLS; i++) row[i] = row[i] === T.WATER ? T.BRIDGE : T.HROAD;
-    else {
-      const put = c => { row[c] = row[c] === T.WATER ? T.BRIDGE : T.ROAD; };
-      put(g.road); if (g.prev !== undefined && g.prev !== g.road) put(g.prev);
-    }
-    g.prev = g.road;
+    g.m = { river: g.river, rw: g.riverW, road: g.road, hroad: bridge, hmid: zr % 44 === 21, hfrom: 0 };
+    const put = c => { row[c] = row[c] === T.WATER ? T.BRIDGE : T.ROAD; };
+    for (let i = g.road - 1; i <= g.road + 1; i++) put(i);
+    if (bridge) for (let i = 0; i < COLS; i++) row[i] = row[i] === T.WATER || row[i] === T.BRIDGE ? T.BRIDGE : T.HROAD;
   } else if (th === 2) {                // Industrie: Straßenraster, Hallen
-    const hroad = zr % 22 === 0;
-    g.m = { hroad };
+    const hroad = zr % 26 < 3;
+    g.m = { hroad, hmid: zr % 26 === 1, hfrom: 0 };
     for (let i = 0; i < COLS; i++) {
       const b = inBlob(i);
       row[i] = b && b.k < 0.25 ? T.GRASS : T.CONCRETE;
-      if (i === 6 || i === 22) row[i] = T.ROAD;
+      if ((i >= 5 && i <= 7) || (i >= 21 && i <= 23)) row[i] = T.ROAD;
       if (hroad) row[i] = T.HROAD;
     }
     if (!hroad) village(r, row, 0, COLS, true);
