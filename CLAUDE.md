@@ -37,3 +37,4 @@ bestimmten Spiels: eigene Sprites, Gegner, Gelände, Musik; keine Namen bekannte
   breite Querstraßen (Küste alle 48 Reihen, Wald 44 mit breiten Brücken, Industrie 26), ruhigere flächige Texturen,
   kaum Büsche, lockerer Wald mit großen Kronen, weniger Industrie-Deko, eine Brandungslinie.
 - Bug: Heli ab dem 2. Leben unsichtbar (und unverwundbar, sammelte keine Extras): Respawn-Timer endete bei -0,0x statt 0, Prüfungen nutzen !p.dead. Fix: p.dead = 0 beim Wiedereinstieg; Regressionstest (Treffer → Respawn → sichtbar/treffbar) per Playwright.
+- Feedback (Kraterläufer, gleiche Ursache) „Knöpfe verfehlt → Zoom hängt“: gleicher Zoom-Schutz wie dort: touchend/touchmove/gesture*/dblclick außerhalb .ov blockiert, Trefferfläche ±16 px um BOMBE/Pause, Pause per pointerdown, Zoom-Reset über visualViewport.scale. Ziehen-Steuerung und Respawn-Test weiter ok.

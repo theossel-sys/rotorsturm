@@ -43,6 +43,10 @@
   #bombBtn:active { transform: translateY(2px); }
   #pauseBtn { right: calc(env(safe-area-inset-right) + 10px); top: calc(env(safe-area-inset-top) + 10px);
     width: 40px; height: 40px; background: rgba(0,0,0,.35); color: #fff; font-size: 12px; border: 2px solid rgba(255,255,255,.4); }
+  /* große unsichtbare Trefferflächen um die Touch-Knöpfe */
+  #pad button::after, #bombBtn::after, #pauseBtn::after { content: ''; position: absolute; inset: -16px; border-radius: 50%; }
+  #pauseBtn::after { border-radius: 8px; inset: -10px; }
+  html, body, canvas, #wrap { touch-action: none; -webkit-tap-highlight-color: transparent; }
 </style>
 </head>
 <body>

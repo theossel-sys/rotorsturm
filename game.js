@@ -1135,7 +1135,7 @@ $('again').onclick = start;
 $('resume').onclick = togglePause;
 $('quit').onclick = () => { state = 'title'; titleHi(); show('title'); };
 $('sound').onclick = () => { AUDIO.unlock(); AUDIO.toggle(); titleHi(); };
-$('pauseBtn').onclick = togglePause;
+$('pauseBtn').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); togglePause(); });
 $('bombBtn').addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); useBomb(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') togglePause(); });
 titleHi();
@@ -1157,3 +1157,18 @@ requestAnimationFrame(frame);
 
 // Testzugang für automatische Prüfungen (unsichtbar im Spiel)
 window.__rotor = { get G() { return G; }, get state() { return state; }, start, update: dt => update(dt) };
+
+// ---------------------------------------------------------------- iPhone: kein Zoomen durch Doppeltippen oder Zwei-Finger-Geste
+// (Safari ignoriert „user-scalable=no“; Menüs in .ov bleiben normal anklickbar)
+document.addEventListener('touchend', e => { if (!e.target.closest('.ov')) e.preventDefault(); }, { passive: false });
+document.addEventListener('touchmove', e => { if (e.touches.length > 1 || !e.target.closest('.ov')) e.preventDefault(); }, { passive: false });
+['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
+document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
+// falls doch gezoomt wurde: Ansicht zurücksetzen
+if (window.visualViewport) visualViewport.addEventListener('resize', () => {
+  if (visualViewport.scale > 1.01) {
+    const m = document.querySelector('meta[name=viewport]'), c = m.content;
+    m.content = c.replace(/maximum-scale=[^,]*/, 'maximum-scale=1.0001');
+    setTimeout(() => { m.content = c; }, 60);
+  }
+});
